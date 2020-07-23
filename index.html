@@ -1,8 +1,27 @@
 <!DOCTYPE html>
 <html>
+<head>
+    <title>localChat</title>
+    <script type="text/javascript" src="http://ajax.googleapis.com/ajax/libs/jquery/1.4.2/jquery.min.js"></script>
+    <script type="text/javascript">
+        var conn;
+        if (window["WebSocket"]) {
+            conn = new WebSocket("ws://localhost:8000/wsconn");
+            conn.onclose = function(evt) {
+                console.log("Connection Closed.")
+            }
+            conn.onmessage = function(evt) {
+                var m = JSON.parse(JSON.parse(evt.data))
+                console.log(m)
+            }
+        } else {
+            console.log("WebSockets Not Support.")
+        }
+    </script>
+</head>
 <body>
 
-<form action="http://127.0.0.1:8000/parseform">
+<form action="http://127.0.0.1:8000/parseform" target="nm_iframe">
     First name:<br>
     <input type="text" name="username" value="Mickey">
     <br>
@@ -11,6 +30,8 @@
     <br><br>
     <input type="submit" value="Submit">
 </form>
+
+<iframe id="id_iframe" name="nm_iframe" style="display:none;"></iframe>
 
 </body>
 </html>

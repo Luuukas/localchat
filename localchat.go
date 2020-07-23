@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
@@ -16,10 +15,15 @@ type amsg struct {
 	text     string
 }
 
+func (m amsg) String() string {
+	return fmt.Sprintf(`{"username":"%s", "senttime":"%s", "text":"%s"}`, m.username, m.senttime, m.text)
+}
+
 var (
 	recvmsgs = make(chan amsg, 1024)
 
-	ip = net.ParseIP("224.0.0.250")
+	//ip = net.ParseIP("224.0.0.250")
+	ip = net.ParseIP("127.0.0.1")
 
 	srcAddr = &net.UDPAddr{IP: net.IPv4zero, Port: 0}
 	dstAddr = &net.UDPAddr{IP: ip, Port: 9981}
@@ -48,12 +52,6 @@ func init() {
 				fmt.Printf("error during read: %s", err)
 			}
 			recvmsgs <- parseMsg(data[:n])
-		}
-	}()
-
-	go func() {
-		for {
-			fmt.Println(<-recvmsgs)
 		}
 	}()
 
@@ -104,28 +102,53 @@ func parseMsg(res []byte) (m amsg) {
 }
 
 func IndexHandler(w http.ResponseWriter, r *http.Request) {
-	// 根据请求body创建一个json解析器实例r
-	decoder := json.NewDecoder(r.Body)
-
-	// 用于存放参数key=value数据
-	var params map[string]string
-
-	// 解析参数 存入map
-	decoder.Decode(&params)
-
-	fmt.Printf("POST json: username=%s, text=%s\n", params["username"], params["text"])
+	//// 根据请求body创建一个json解析器实例r
+	//decoder := json.NewDecoder(r.Body)
+	//
+	//// 用于存放参数key=value数据
+	//var params map[string]string
+	//
+	//// 解析参数 存入map
+	//decoder.Decode(&params)
+	//
+	//fmt.Printf("POST json: username=%s, text=%s\n", params["username"], params["text"])
+	//m := amsg{
+	//	username: params["username"],
+	//	senttime: time.Now(),
+	//	text:     params["text"],
+	//}
+	r.ParseForm()
+	username := r.Form.Get("username")
+	text := r.Form.Get("text")
+	fmt.Printf("POST json: username=%s, text=%s\n", username, text)
 	m := amsg{
-		username: params["username"],
+		username: username,
 		senttime: time.Now(),
-		text:     params["text"],
+		text:     text,
 	}
 	fmt.Println(m)
 	sendMsg(intoUDP(m))
 	fmt.Fprintf(w, `{"code":0}`)
 }
 
+func WsHandler(w http.ResponseWriter, r *http.Request) {
+	upgrader.CheckOrigin = func(r *http.Request) bool { return true }
+	c, err := upgrader.Upgrade(w, r, nil)
+	defer c.Close()
+	if err!=nil {
+		fmt.Println(err)
+	}
+	for {
+		m := <-recvmsgs
+		fmt.Println(m.String())
+		c.WriteJSON(m.String())
+	}
+
+}
+
 func main() {
 	defer conn.Close()
 	http.HandleFunc("/parseform", IndexHandler)
+	http.HandleFunc("/wsconn", WsHandler)
 	http.ListenAndServe("127.0.0.1:8000", nil)
 }
