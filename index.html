@@ -2,9 +2,10 @@
 <html>
 <head>
     <title>localChat</title>
-    <script type="text/javascript" src="http://ajax.googleapis.com/ajax/libs/jquery/1.4.2/jquery.min.js"></script>
+    <script src="http://libs.baidu.com/jquery/2.0.0/jquery.min.js"></script>
     <script type="text/javascript">
         var conn;
+        var uname = "groschen"
         if (window["WebSocket"]) {
             conn = new WebSocket("ws://localhost:8000/wsconn");
             conn.onclose = function(evt) {
@@ -13,25 +14,111 @@
             conn.onmessage = function(evt) {
                 var m = JSON.parse(JSON.parse(evt.data))
                 console.log(m)
+                $("#msgspanel").append("<div><label>"+m.username+"</label>&nbsp;&nbsp;:&nbsp;&nbsp;"+m.text+"<br><label style='float: right'>"+m.senttime+"</label></div><hr>");
             }
         } else {
             console.log("WebSockets Not Support.")
         }
+
+        function sendmsg(){
+            console.log(uname)
+            var text=$("#newmsg").val();
+            $.post("http://127.0.0.1:8000/parseform",
+                JSON.stringify({
+                    username : uname,
+                    text : text
+                }),function(result){
+                console.log(result);
+            });
+        }
     </script>
 </head>
 <body>
-
-<form action="http://127.0.0.1:8000/parseform" target="nm_iframe">
-    First name:<br>
-    <input type="text" name="username" value="Mickey">
-    <br>
-    Last name:<br>
-    <input type="text" name="text" value="Mouse">
-    <br><br>
-    <input type="submit" value="Submit">
-</form>
-
-<iframe id="id_iframe" name="nm_iframe" style="display:none;"></iframe>
-
+<div id="msgspanel" style="height: 95%;position:fixed;top:0;overflow: scroll;width: 100%">
+    <p>
+        asdf
+    </p>
+    <hr>
+    <p>
+        asdf
+    </p>
+    <hr>
+    <p>
+        asdf
+    </p>
+    <hr>
+    <p>
+        asdf
+    </p>
+    <p>
+        asdf
+    </p><p>
+        asdf
+    </p><p>
+        asdf
+    </p><p>
+        asdf
+    </p><p>
+        asdf
+    </p><p>
+        asdf
+    </p>
+    <p>
+        asdf
+    </p>
+    <p>
+        asdf
+    </p>
+    <p>
+        asdf
+    </p>
+    <p>
+        asdf
+    </p>
+    <p>
+        asdf
+    </p><p>
+        asdf
+    </p><p>
+        asdf
+    </p><p>
+        asdf
+    </p><p>
+        asdf
+    </p><p>
+        asdf
+    </p>
+    <p>
+        asdf
+    </p>
+    <p>
+        asdf
+    </p>
+    <p>
+        asdf
+    </p>
+    <p>
+        asdf
+    </p>
+    <p>
+        asdf
+    </p><p>
+        asdf
+    </p><p>
+        asdf
+    </p><p>
+        asdf
+    </p><p>
+        asdf
+    </p><p>
+        asdf
+    </p>
+</div>
+<div style="height:5%;position:fixed;bottom:0;">
+    <label type="text" name="username">groschen</label>
+    &nbsp;&nbsp;:&nbsp;&nbsp;
+    <input id="newmsg" type="text" name="text" placeholder="say something ...">
+    <button type="submit" onclick="sendmsg()">Send</button>
+</div>
 </body>
 </html>

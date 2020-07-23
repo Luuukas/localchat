@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
@@ -102,30 +103,33 @@ func parseMsg(res []byte) (m amsg) {
 }
 
 func IndexHandler(w http.ResponseWriter, r *http.Request) {
-	//// 根据请求body创建一个json解析器实例r
-	//decoder := json.NewDecoder(r.Body)
-	//
-	//// 用于存放参数key=value数据
-	//var params map[string]string
-	//
-	//// 解析参数 存入map
-	//decoder.Decode(&params)
-	//
-	//fmt.Printf("POST json: username=%s, text=%s\n", params["username"], params["text"])
-	//m := amsg{
-	//	username: params["username"],
-	//	senttime: time.Now(),
-	//	text:     params["text"],
-	//}
-	r.ParseForm()
-	username := r.Form.Get("username")
-	text := r.Form.Get("text")
-	fmt.Printf("POST json: username=%s, text=%s\n", username, text)
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	// 根据请求body创建一个json解析器实例r
+	decoder := json.NewDecoder(r.Body)
+
+	// 用于存放参数key=value数据
+	var params map[string]string
+
+	// 解析参数 存入map
+	decoder.Decode(&params)
+
+	fmt.Println(r.Body)
+
+	fmt.Printf("POST json: username=%s, text=%s\n", params["username"], params["text"])
 	m := amsg{
-		username: username,
+		username: params["username"],
 		senttime: time.Now(),
-		text:     text,
+		text:     params["text"],
 	}
+	//r.ParseForm()
+	//username := r.Form.Get("username")
+	//text := r.Form.Get("text")
+	//fmt.Printf("POST json: username=%s, text=%s\n", username, text)
+	//m := amsg{
+	//	username: username,
+	//	senttime: time.Now(),
+	//	text:     text,
+	//}
 	fmt.Println(m)
 	sendMsg(intoUDP(m))
 	fmt.Fprintf(w, `{"code":0}`)
