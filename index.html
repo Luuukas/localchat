@@ -21,7 +21,6 @@
         }
 
         function sendmsg(){
-            console.log(uname)
             var text=$("#newmsg").val();
             $.post("http://127.0.0.1:8000/parseform",
                 JSON.stringify({

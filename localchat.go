@@ -11,19 +11,26 @@ import (
 )
 
 type amsg struct {
+	// resenttime
+
+	// "localchat"
+
+	// 该用户发送该信息的唯一连续序号
+	seq      int64
 	username string
 	senttime time.Time
 	text     string
-	seq int64
 }
 
 func (m amsg) String() string {
-	return fmt.Sprintf(`{"username":"%s", "senttime":"%s", "text":"%s"}`, m.username, m.senttime, m.text)
+	return fmt.Sprintf(`{"seq":"%d", "username":"%s", "senttime":"%s", "text":"%s"}`, m.seq,m.username, m.senttime, m.text)
 }
 
 // 双向链表节点，用于实现双向队列，实现单调队列
 type dnode struct {
+	// 延迟
 	delay time.Duration
+	// 邻近节点的用户名，用于映射到UDP连接
 	pusername string
 	pre *dnode
 	nxt *dnode
@@ -31,24 +38,25 @@ type dnode struct {
 
 // 双向链表
 type deque struct {
+	// 双向链表实现的队列的最大元素个数
 	limitn int
+	// 当前队列中的元素个数
 	n int
 	head *dnode
 	rear *dnode
 }
 
 func newDeque() *deque {
-	emptyDnode := new(dnode)
 	return &deque{
 		limitn: 16,
 		n: 0,
-		head: emptyDnode,
-		rear: emptyDnode,
+		head: nil,
+		rear: nil,
 	}
 }
 
 func (dq *deque)front() *dnode{
-	return dq.head.nxt
+	return dq.head
 }
 
 func (dq *deque)back() *dnode{
@@ -56,7 +64,7 @@ func (dq *deque)back() *dnode{
 }
 
 func (dq *deque)pop_front() {
-	if dq.n ==0 {
+	if dq.n == 0 {
 		return
 	}
 	dq.head = dq.head.nxt
@@ -72,15 +80,23 @@ func (dq *deque)pop_back() {
 }
 
 func (dq *deque) push_back(ndn *dnode) {
-	dq.rear.nxt = ndn
-	dq.rear = ndn
-	dq.n++
+	if dq.n == 0 {
+		dq.head = ndn
+		dq.rear = ndn
+		dq.n++
+	}else {
+		dq.rear.nxt = ndn
+		dq.rear = ndn
+		dq.n++
+	}
 }
 
 func (dq *deque) inc_push(ndn *dnode) {
 	for dq.n > 0 {
 		if dq.back().delay > ndn.delay {
 			dq.pop_back()
+		} else {
+			break
 		}
 	}
 	dq.push_back(ndn)
@@ -130,18 +146,16 @@ var (
 	mseqcnt int64 = 0
 
 	// 便于向信息源再次获取丢失消息
-	peerconn = make(map[string] *net.UDPAddr)
-	// 缓存信息，便于响应peers的再次获取请求
+	peerip = make(map[string] string)
+	// 缓存信息，便于响应peers的再次获取请求，去除前8个byte，原前8个byte不用加密
 	msgstore = make(map[string] map[int64] []byte)
-
-	msgrereq = make(map[string] map[int64] time.Time)
 
 	incqueue = newDeque()
 )
 
+// 向邻近节点或信息源重新获取某个用户发过的第seq条信息
 func rerecvMsg(pusername string, seq int64) {
 	info := make([]byte, 0)
-	info = append(info, byte('1'))
 	info = append(info, byte(len(pusername)))
 	info = append(info, []byte(pusername)...)
 	info = append(info, writeInt64(seq)...)
@@ -153,33 +167,44 @@ func rerecvMsg(pusername string, seq int64) {
 		answerer = dn.pusername
 	}
 
-	msgrereq[pusername][seq] = time.Now()
-	sendInfo(info, peerconn[answerer])
+	// 非组播，而是直接单播
+	pip := peerip[answerer]
+	dstaddr := &net.UDPAddr{IP: net.ParseIP(pip), Port: 9983}
+	sendInfo(info, dstaddr)
 }
 
+// 收到别人想重新获取某条信息的请求，进行响应
 func resendMsg(dstaddr *net.UDPAddr, data []byte, n int) {
-	ulen:= data[1]
-	username := string(data[2:2+ulen])
-	seq := readInt64(data[2+ulen:2+ulen+8])
-	sendInfo(msgstore[username][seq], dstaddr)
+	ulen:= data[0]
+	username := string(data[1:1+ulen])
+	seq := readInt64(data[1+ulen:1+ulen+8])
+
+	newmsg := make([]byte, len(msgstore[username][seq]))
+
+	newmsg = append(newmsg, writeInt64(time.Now().Unix())...)
+	newmsg = append(newmsg, msgstore[username][seq]...)
+
+	sendInfo(newmsg, dstaddr)
 }
 
+// 作为host的主机对入会请求进行验证
 func verify(dstaddr *net.UDPAddr, data []byte, n int) {
-	plen := data[1]
+	plen := data[0]
 	// 验证会议密码
-	ipassword := string(data[2:plen+2])
+	ipassword := string(data[1:plen+1])
 	if ipassword == wpassword {
-		ulen := data[plen+2]
-		iusername := string(data[plen+3:plen+3+ulen])
+		ulen := data[plen+1]
+		iusername := string(data[plen+2:plen+2+ulen])
 		// 该用户不在名单中
 		if _, ok := members[iusername]; !ok {
 			sendInfo([]byte("2"), dstaddr)
 		} else {
-			// 该用户再名单中
-			members[iusername] = string(data[plen+3+ulen:n])
+			// 该用户在白名单中，保存其公钥
+			members[iusername] = string(data[plen+2+ulen:n])
 
 			// 发送前应先用对方的公钥进行加密
 
+			// 发送通讯密钥
 			sendInfo([]byte("0"+chatkey), dstaddr)
 		}
 	} else {
@@ -188,6 +213,7 @@ func verify(dstaddr *net.UDPAddr, data []byte, n int) {
 }
 
 func init() {
+	// 用于接收组播udp通讯的ip及端口
 	addr, err := net.ResolveUDPAddr("udp", "224.0.0.250:9981")
 	if err != nil {
 		fmt.Println(err)
@@ -201,14 +227,59 @@ func init() {
 	go func() {
 		data := make([]byte, 1024)
 		for {
-			n, _, err := listener.ReadFromUDP(data)
+			n, dstaddr, err := listener.ReadFromUDP(data)
+			if err != nil {
+				fmt.Printf("error during read: %s", err)
+			}
+			m := parseMsg(data[:n])
+			fmt.Println("debug: ",m)
+			peerip[m.username] = dstaddr.IP.String()
+			recvmsgs <- m
+		}
+	}()
+	// 监听邻近节点重发的udp信息，监听本地9981
+	rraddr, rrerr := net.ResolveUDPAddr("udp", "127.0.0.1:9982")
+	if rrerr != nil {
+		fmt.Println(rrerr)
+	}
+	rrlistener, rrerr := net.ListenUDP("udp",  rraddr)
+	if rrerr != nil {
+		fmt.Println(rrerr)
+		return
+	}
+	fmt.Printf("Local: <%s> \n", rrlistener.LocalAddr().String())
+	go func() {
+		data := make([]byte, 1024)
+		for {
+			n, _, err := rrlistener.ReadFromUDP(data)
 			if err != nil {
 				fmt.Printf("error during read: %s", err)
 			}
 			recvmsgs <- parseMsg(data[:n])
 		}
 	}()
-
+	// 监听邻近节点重发的请求，监听本地9982
+	rqaddr, rqerr := net.ResolveUDPAddr("udp", "127.0.0.1:9983")
+	if rqerr != nil {
+		fmt.Println(rqerr)
+	}
+	rqlistener, rqerr := net.ListenUDP("udp",  rqaddr)
+	if rqerr != nil {
+		fmt.Println(rqerr)
+		return
+	}
+	fmt.Printf("Local: <%s> \n", rqlistener.LocalAddr().String())
+	go func() {
+		data := make([]byte, 1024)
+		for {
+			n, dstaddr, err := rqlistener.ReadFromUDP(data)
+			if err != nil {
+				fmt.Printf("error during read: %s", err)
+			}
+			resendMsg(dstaddr, data, n)
+		}
+	}()
+	// 用于发送组播的udp配置
 	conn, err = net.DialUDP("udp", srcAddr, dstAddr)
 	if err != nil {
 		fmt.Println(err)
@@ -227,8 +298,9 @@ func sendInfo(info []byte, dstaddr *net.UDPAddr){
 }
 
 // 其中一个客户端成为Host，用于验证与分发通信密钥
-func controllink(behost bool) {
-	addr, err := net.ResolveUDPAddr("udp", "224.0.0.250:9982")
+func controllink() {
+	// 监听入会请求/重发信息请求的组播ip及端口
+	addr, err := net.ResolveUDPAddr("udp", "224.0.0.250:9984")
 	if err != nil {
 		fmt.Println(err)
 	}
@@ -248,13 +320,7 @@ func controllink(behost bool) {
 
 			// 此处应先用host的私钥进行解密
 
-			if behost && data[0] == byte('0') {
-				verify(dstaddr, data, n)
-			} else if data[0] == byte('1') {
-				resendMsg(dstaddr, data, n)
-			} else {
-				fmt.Println("unknown control request...")
-			}
+			verify(dstaddr, data, n)
 
 		}
 	}()
@@ -262,13 +328,12 @@ func controllink(behost bool) {
 
 // 请求参与会议
 func join(password string) {
-	dstaddr := &net.UDPAddr{IP: ip, Port: 9982}
+	dstaddr := &net.UDPAddr{IP: ip, Port: 9984}
 	conn, err := net.DialUDP("udp", srcAddr, dstaddr)
 	if err != nil {
 		fmt.Println(err)
 	}
 	info := make([]byte, 0)
-	info = append(info, byte('0'))    // 验证类型
 	info = append(info, byte(len(password)))
 	info = append(info, []byte(password)...)
 	info = append(info, byte(len(musername)))
@@ -326,6 +391,7 @@ func readInt64(buf []byte) (n int64) {
 
 func intoUDP(m amsg) (res []byte) {
 	res = make([]byte, 0)
+	res = append(res, writeInt64(m.senttime.Unix())...)
 	res = append(res, []byte("localchat")...)
 	res = append(res, writeInt64(mseqcnt)...)
 	mseqcnt++
@@ -337,6 +403,12 @@ func intoUDP(m amsg) (res []byte) {
 }
 
 func parseMsg(res []byte) (m amsg) {
+	// 前8个byte为明文
+	fmt.Println(res)
+	resenttime := time.Unix(readInt64(res[:8]), 0)
+
+	res = res[8:]
+	fmt.Println(res)
 	// 用chatkey进行解密
 
 	// 如果解密后首9个byte分别为localchat则认为该信息来自所参与的chat
@@ -347,27 +419,21 @@ func parseMsg(res []byte) (m amsg) {
 	unlen := int(res[9+8])
 	m.username = string(res[8+9+1 : 8+9+unlen+1])
 
+	if _, ok := msgstore[m.username]; !ok {
+		msgstore[m.username] = make(map[int64] []byte)
+	}
 	msgstore[m.username][m.seq] = res
 
 	m.senttime = time.Unix(readInt64(res[8+9+unlen+1:8+9+unlen+9]), 0)
 
-	if st, ok := msgrereq[m.username][m.seq]; ok {    // 为重新获取的信息
-		// 与重查时刻做差除以2计算延迟，加入deque
-		dn := &dnode{
-			delay: time.Now().Sub(st) / 2,
-			pusername: m.username,
-			pre: nil,
-			nxt: nil,
-		}
-		incqueue.inc_push(dn)
-		delete(msgrereq[m.username], m.seq)
-	} else {    // 为新信息
+	delay := time.Now().Sub(resenttime)
+	if delay < maxDelay {
 		// 与新信息发送时刻做差计算延迟，加入deque
 		dn := &dnode{
-			delay: time.Now().Sub(m.senttime),
+			delay:     delay,
 			pusername: m.username,
-			pre: nil,
-			nxt: nil,
+			pre:       nil,
+			nxt:       nil,
 		}
 		incqueue.inc_push(dn)
 	}
@@ -388,6 +454,7 @@ func IndexHandler(w http.ResponseWriter, r *http.Request) {
 	decoder.Decode(&params)
 
 	m := amsg{
+		seq: mseqcnt,
 		username: params["username"],
 		senttime: time.Now(),
 		text:     params["text"],
@@ -442,3 +509,7 @@ func main() {
 	http.HandleFunc("/wsconn", WsHandler)
 	http.ListenAndServe("127.0.0.1:8000", nil)
 }
+
+const (
+	maxDelay = 500 * time.Millisecond
+)
